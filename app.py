@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
+import altair as alt
 
 # Page configuration
 st.set_page_config(page_title="Division Tracker Dashboard", layout="wide")
@@ -16,7 +17,6 @@ def load_data():
     df = conn.read(header=2)
     
     # Drop completely blank rows or organizational banner rows (e.g., "Div 7")
-    # We identify real data rows by ensuring 'Completer' or 'Section' isn't null
     df = df.dropna(subset=['Completer'], how='all')
     
     # Forward-fill the 'Div' column in case of merged cells in the original sheet
@@ -31,12 +31,9 @@ except Exception as e:
     st.error(f"Error loading data. Check your secrets.toml URL. Details: {e}")
     st.stop()
 
-# Define columns we want to filter by
-filter_columns = ['Examiner', 'Div', 'Dept', 'Section', 'Completer', 'Due Date']
-
 st.sidebar.header("Navigation")
 
-# Clean the 'Div' column to ensure colors map correctly (removes '.0' if pandas read it as a decimal)
+# Clean the 'Div' column to ensure colors map correctly (removes '.0' if read as a decimal)
 df['Div'] = df['Div'].fillna("").astype(str).str.strip().str.replace('.0', '', regex=False)
 
 # 1. QUICK DIVISION FILTER
@@ -56,6 +53,15 @@ with st.sidebar.expander("More Filters (Optional)"):
         if selected_examiner:
             filtered_df = filtered_df[filtered_df['Examiner'].isin(selected_examiner)]
             
+    # Department Filter (Checks for 'Dept' or 'Department')
+    dept_col = 'Dept' if 'Dept' in filtered_df.columns else ('Department' if 'Department' in filtered_df.columns else None)
+    if dept_col:
+        dept_vals = filtered_df[dept_col].fillna("").astype(str).str.strip().str.replace('.0', '', regex=False)
+        dept_options = sorted([d for d in dept_vals.unique() if d and d.lower() != 'nan'])
+        selected_dept = st.multiselect("Department", options=dept_options)
+        if selected_dept:
+            filtered_df = filtered_df[filtered_df[dept_col].fillna("").astype(str).str.strip().str.replace('.0', '', regex=False).isin(selected_dept)]
+
     # Completer Filter
     if 'Completer' in filtered_df.columns:
         completer_options = sorted([c for c in filtered_df['Completer'].fillna("").astype(str).unique() if c and c.lower() != 'nan'])
@@ -88,30 +94,73 @@ with col3:
     if 'Total Points Possible' in filtered_df.columns:
         st.metric(label="Total Points Possible", value=round(filtered_df['Total Points Possible'].sum(), 2))
 
-# 3. GRAPHS
+# ---------------------------------------------------------
+# COLOR MAP DEFINITIONS FOR DIVISIONS 1 THROUGH 7
+# ---------------------------------------------------------
+
+# Pastel colors for Table Backgrounds
+TABLE_COLOR_MAP = {
+    '1': '#fff8e1',  # Light Yellow
+    '2': '#f3e5f5',  # Light Purple
+    '3': '#e8f5e9',  # Light Green
+    '4': '#fff3e0',  # Light Peach/Orange
+    '5': '#fce4ec',  # Light Pink
+    '6': '#e0f7fa',  # Light Cyan/Teal
+    '7': '#e3f2fd',  # Light Blue
+}
+
+# Richer tones matching the same colors for the bar chart
+CHART_COLOR_MAP = [
+    '#fbc02d',  # Div 1 - Yellow
+    '#ab47bc',  # Div 2 - Purple
+    '#66bb6a',  # Div 3 - Green
+    '#ffa726',  # Div 4 - Peach/Orange
+    '#ec407a',  # Div 5 - Pink
+    '#26c6da',  # Div 6 - Teal
+    '#42a5f5',  # Div 7 - Blue
+]
+
+# 3. COLOR-CODED BAR CHART
 st.subheader("Performance Overview")
 if 'Completer' in filtered_df.columns and 'Total Points Possible' in filtered_df.columns:
-    # Group data for the chart, drop empty completers
-    chart_data = filtered_df[filtered_df['Completer'] != ""].groupby('Completer')['Total Points Possible'].sum().reset_index()
-    # Display a native Streamlit bar chart
-    st.bar_chart(data=chart_data, x='Completer', y='Total Points Possible', use_container_width=True)
+    # Group data by Completer AND Division so bars are color-coded by Division
+    chart_data = (
+        filtered_df[filtered_df['Completer'] != ""]
+        .groupby(['Completer', 'Div'])['Total Points Possible']
+        .sum()
+        .reset_index()
+    )
+    
+    if not chart_data.empty:
+        domain_divisions = ['1', '2', '3', '4', '5', '6', '7']
+        
+        chart = (
+            alt.Chart(chart_data)
+            .mark_bar()
+            .encode(
+                x=alt.X('Completer:N', sort='-y', title='Completer'),
+                y=alt.Y('Total Points Possible:Q', title='Total Points Possible'),
+                color=alt.Color(
+                    'Div:N',
+                    scale=alt.Scale(domain=domain_divisions, range=CHART_COLOR_MAP),
+                    title='Division'
+                ),
+                tooltip=['Completer', 'Div', 'Total Points Possible']
+            )
+            .properties(height=380)
+        )
+        
+        st.altair_chart(chart, use_container_width=True)
 
-# 4. CUSTOM COLORS & DATA DISPLAY
+# 4. DATA TABLE DISPLAY WITH MATCHING BACKGROUND COLORS
 def color_rows(row):
-    # Ensure strict matching by converting to string and dropping any rogue decimals
     div = str(row.get('Div', '')).strip().replace('.0', '')
-    
-    if div == '7':
-        return ['background-color: #e3f2fd; color: black'] * len(row) # Light Blue
-    elif div == '1':
-        return ['background-color: #fff8e1; color: black'] * len(row) # Light Yellow
-    elif div == '2':
-        return ['background-color: #f3e5f5; color: black'] * len(row) # Light Purple
-    
+    bg_color = TABLE_COLOR_MAP.get(div, '')
+    if bg_color:
+        return [f'background-color: {bg_color}; color: black'] * len(row)
     return [''] * len(row)
 
 st.subheader("Tracker Data")
 
-# Apply the style and strict 2-decimal formatting to the dataframe
 styled_df = filtered_df.style.apply(color_rows, axis=1).format(precision=2, na_rep="")
 st.dataframe(styled_df, use_container_width=True, hide_index=True)
