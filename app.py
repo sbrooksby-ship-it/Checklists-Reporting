@@ -13,13 +13,9 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # Fetch data with caching to optimize performance and respect API limits
 @st.cache_data(ttl=600)
 def load_data():
-    # header=2 sets the 3rd row of the sheet as the dataframe columns (0-indexed)
     df = conn.read(header=2)
-    
-    # Drop completely blank rows or organizational banner rows (e.g., "Div 7")
     df = df.dropna(subset=['Completer'], how='all')
     
-    # Forward-fill the 'Div' column in case of merged cells in the original sheet
     if 'Div' in df.columns:
         df['Div'] = df['Div'].ffill()
         
@@ -33,7 +29,7 @@ except Exception as e:
 
 st.sidebar.header("Navigation")
 
-# Clean the 'Div' column to ensure colors map correctly (removes '.0' if read as a decimal)
+# Clean the 'Div' column to ensure colors map correctly
 df['Div'] = df['Div'].fillna("").astype(str).str.strip().str.replace('.0', '', regex=False)
 
 # 1. QUICK DIVISION FILTER
@@ -46,14 +42,12 @@ if selected_div != "All":
 
 # 2. CASCADING SECONDARY FILTERS
 with st.sidebar.expander("More Filters (Optional)"):
-    # Examiner Filter
     if 'Examiner' in filtered_df.columns:
         examiner_options = sorted([e for e in filtered_df['Examiner'].fillna("").astype(str).unique() if e and e.lower() != 'nan'])
         selected_examiner = st.multiselect("Examiner", options=examiner_options)
         if selected_examiner:
             filtered_df = filtered_df[filtered_df['Examiner'].isin(selected_examiner)]
             
-    # Department Filter (Checks for 'Dept' or 'Department')
     dept_col = 'Dept' if 'Dept' in filtered_df.columns else ('Department' if 'Department' in filtered_df.columns else None)
     if dept_col:
         dept_vals = filtered_df[dept_col].fillna("").astype(str).str.strip().str.replace('.0', '', regex=False)
@@ -62,43 +56,50 @@ with st.sidebar.expander("More Filters (Optional)"):
         if selected_dept:
             filtered_df = filtered_df[filtered_df[dept_col].fillna("").astype(str).str.strip().str.replace('.0', '', regex=False).isin(selected_dept)]
 
-    # Completer Filter
     if 'Completer' in filtered_df.columns:
         completer_options = sorted([c for c in filtered_df['Completer'].fillna("").astype(str).unique() if c and c.lower() != 'nan'])
         selected_completer = st.multiselect("Completer", options=completer_options)
         if selected_completer:
             filtered_df = filtered_df[filtered_df['Completer'].isin(selected_completer)]
 
-    # Due Date Filter
     if 'Due Date' in filtered_df.columns:
         due_options = sorted([d for d in filtered_df['Due Date'].fillna("").astype(str).unique() if d and d.lower() != 'nan'])
         selected_due = st.multiselect("Due Date", options=due_options)
         if selected_due:
             filtered_df = filtered_df[filtered_df['Due Date'].isin(selected_due)]
 
-# Force numeric columns to floats and round to the nearest 100th
+# Force numeric columns to floats for calculations
 for col in ['# of TM', '# of Points', 'Total Points Possible']:
     if col in filtered_df.columns:
-        filtered_df[col] = pd.to_numeric(filtered_df[col], errors='coerce').round(2)
+        filtered_df[col] = pd.to_numeric(filtered_df[col], errors='coerce').fillna(0)
 
-# Top-level metrics
+# ---------------------------------------------------------
+# MEANINGFUL METRIC CALCULATIONS
+# ---------------------------------------------------------
+total_tasks = len(filtered_df)
+total_tm = int(filtered_df['# of TM'].sum()) if '# of TM' in filtered_df.columns else 0
+total_pts = filtered_df['Total Points Possible'].sum() if 'Total Points Possible' in filtered_df.columns else 0
+
+# Ratios for real operational insights
+avg_pts_per_tm = round(total_pts / total_tm, 2) if total_tm > 0 else 0.0
+avg_pts_per_task = round(total_pts / total_tasks, 2) if total_tasks > 0 else 0.0
+
 st.subheader("Current View Metrics")
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.metric(label="Total Sections/Tasks", value=len(filtered_df))
+    st.metric(label="Total Active Tasks", value=total_tasks)
 with col2:
-    if '# of TM' in filtered_df.columns:
-        st.metric(label="Total TM", value=round(filtered_df['# of TM'].sum(), 2))
+    st.metric(label="Total Team Members", value=total_tm)
 with col3:
-    if 'Total Points Possible' in filtered_df.columns:
-        st.metric(label="Total Points Possible", value=round(filtered_df['Total Points Possible'].sum(), 2))
+    st.metric(label="Avg Points / Person", value=avg_pts_per_tm, help="Total Points Possible divided by Total Team Members assigned.")
+with col4:
+    st.metric(label="Avg Weight / Task", value=avg_pts_per_task, help="Average point density per section task.")
 
 # ---------------------------------------------------------
 # COLOR MAP DEFINITIONS FOR DIVISIONS 1 THROUGH 7
 # ---------------------------------------------------------
 
-# Pastel colors for Table Backgrounds
 TABLE_COLOR_MAP = {
     '1': '#fff8e1',  # Light Yellow
     '2': '#f3e5f5',  # Light Purple
@@ -109,7 +110,6 @@ TABLE_COLOR_MAP = {
     '7': '#e3f2fd',  # Light Blue
 }
 
-# Richer tones matching the same colors for the bar chart
 CHART_COLOR_MAP = [
     '#fbc02d',  # Div 1 - Yellow
     '#ab47bc',  # Div 2 - Purple
@@ -123,7 +123,6 @@ CHART_COLOR_MAP = [
 # 3. COLOR-CODED BAR CHART
 st.subheader("Performance Overview")
 if 'Completer' in filtered_df.columns and 'Total Points Possible' in filtered_df.columns:
-    # Group data by Completer AND Division so bars are color-coded by Division
     chart_data = (
         filtered_df[filtered_df['Completer'] != ""]
         .groupby(['Completer', 'Div'])['Total Points Possible']
