@@ -34,28 +34,28 @@ except Exception as e:
 # Define columns we want to filter by
 filter_columns = ['Examiner', 'Div', 'Dept', 'Section', 'Completer', 'Due Date']
 
-st.sidebar.header("Navigation & Filters")
-selected_filters = {}
+st.sidebar.header("Navigation")
 
-# Generate multi-select widgets dynamically for each column
-for col in filter_columns:
-    if col in df.columns:
-        # Safely fill missing values with blanks, then force the whole column to string type
-        df[col] = df[col].fillna("").astype(str)
-        
-        # Now every value is guaranteed to be a string, so .strip() will never fail
-        unique_values = sorted([val for val in df[col].unique() if val.strip() != '' and val.strip().lower() != 'nan'])
-        
-        selected_filters[col] = st.sidebar.multiselect(
-            f"Filter by {col}", 
-            options=unique_values
-        )
+# Clean the 'Div' column so the options are perfect
+df['Div'] = df['Div'].fillna("").astype(str).str.strip()
 
-# Apply selected filters to the dataframe
+# 1. INSTANT ONE-CLICK FILTER (Radio Buttons)
+div_options = ["All"] + sorted([d for d in df['Div'].unique() if d and d.lower() != 'nan'])
+selected_div = st.sidebar.radio("Quick Filter: Division", options=div_options)
+
+# Apply the primary division filter
 filtered_df = df.copy()
-for col, selections in selected_filters.items():
-    if selections:
-        filtered_df = filtered_df[filtered_df[col].isin(selections)]
+if selected_div != "All":
+    filtered_df = filtered_df[filtered_df['Div'] == selected_div]
+
+# 2. CASCADING SECONDARY FILTERS (Hidden in a clean expander)
+with st.sidebar.expander("More Filters (Optional)"):
+    # Notice how this only shows completers for the selected division!
+    completer_options = sorted([c for c in filtered_df['Completer'].fillna("").astype(str).unique() if c and c.lower() != 'nan'])
+    selected_completer = st.multiselect("Completer", options=completer_options)
+    
+    if selected_completer:
+        filtered_df = filtered_df[filtered_df['Completer'].isin(selected_completer)]
 
 # Top-level metrics based on the filtered data
 st.subheader("Current View Metrics")
@@ -72,6 +72,24 @@ with col3:
         pts_sum = pd.to_numeric(filtered_df['Total Points Possible'], errors='coerce').sum()
         st.metric(label="Total Points Possible", value=int(pts_sum))
 
-# Display the interactive dataframe
+# 3. APPLYING CUSTOM COLORS
+# This function applies background colors based on the Division number
+def color_rows(row):
+    div = str(row['Div']).strip()
+    
+    # Using soft pastel hex codes to match your original sheet
+    # Adding 'color: black' ensures text is readable even if the user has Streamlit dark mode on
+    if div == '7':
+        return ['background-color: #e3f2fd; color: black'] * len(row) # Light Blue
+    elif div == '1':
+        return ['background-color: #fff8e1; color: black'] * len(row) # Light Yellow
+    elif div == '2':
+        return ['background-color: #f3e5f5; color: black'] * len(row) # Light Purple
+    
+    return [''] * len(row)
+
 st.subheader("Tracker Data")
-st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+
+# Apply the style to the dataframe before displaying it
+styled_df = filtered_df.style.apply(color_rows, axis=1)
+st.dataframe(styled_df, use_container_width=True, hide_index=True)
