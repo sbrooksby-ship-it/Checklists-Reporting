@@ -40,9 +40,11 @@ selected_filters = {}
 # Generate multi-select widgets dynamically for each column
 for col in filter_columns:
     if col in df.columns:
-        # Convert to string and handle NaN values for clean filtering
-        df[col] = df[col].astype(str).replace('nan', '')
-        unique_values = sorted([val for val in df[col].unique() if val.strip() != ''])
+        # Safely fill missing values with blanks, then force the whole column to string type
+        df[col] = df[col].fillna("").astype(str)
+        
+        # Now every value is guaranteed to be a string, so .strip() will never fail
+        unique_values = sorted([val for val in df[col].unique() if val.strip() != '' and val.strip().lower() != 'nan'])
         
         selected_filters[col] = st.sidebar.multiselect(
             f"Filter by {col}", 
