@@ -179,8 +179,6 @@ with tab1:
             mime="text/csv",
         )
 
-    st.markdown(STATUS_LEGEND_HTML, unsafe_allow_html=True)
-
     # Function to apply Division background colors
     def color_rows(row):
         div = str(row.get('Div', '')).strip().replace('.0', '')
