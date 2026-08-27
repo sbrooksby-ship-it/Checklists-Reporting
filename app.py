@@ -132,121 +132,122 @@ STATUS_LEGEND_HTML = """
 """
 
 # ---------------------------------------------------------
-# GRAPHS & VISUALS
+# TABS & CONTENT
 # ---------------------------------------------------------
+tab1, tab2 = st.tabs(["📊 Main Dashboard", "🗓️ Monthly Status Heatmap"])
 
-# Chart 1: Performance Overview
-st.subheader("Performance Overview")
-if 'Completer' in filtered_df.columns and 'Total Points Possible' in filtered_df.columns:
-    chart_data = (
-        filtered_df[filtered_df['Completer'] != ""]
-        .groupby(['Completer', 'Div'])['Total Points Possible']
-        .sum()
-        .reset_index()
-    )
-    
-    if not chart_data.empty:
-        domain_divisions = ['1', '2', '3', '4', '5', '6', '7']
+with tab1:
+    # Chart 1: Performance Overview
+    st.subheader("Performance Overview")
+    if 'Completer' in filtered_df.columns and 'Total Points Possible' in filtered_df.columns:
+        chart_data = (
+            filtered_df[filtered_df['Completer'] != ""]
+            .groupby(['Completer', 'Div'])['Total Points Possible']
+            .sum()
+            .reset_index()
+        )
         
-        chart = (
-            alt.Chart(chart_data)
+        if not chart_data.empty:
+            domain_divisions = ['1', '2', '3', '4', '5', '6', '7']
+            
+            chart = (
+                alt.Chart(chart_data)
+                .mark_bar()
+                .encode(
+                    x=alt.X('Completer:N', sort='-y', title='Completer'),
+                    y=alt.Y('Total Points Possible:Q', title='Total Points Possible'),
+                    color=alt.Color('Div:N', scale=alt.Scale(domain=domain_divisions, range=CHART_COLOR_MAP), title='Division'),
+                    tooltip=['Completer', 'Div', 'Total Points Possible']
+                )
+                .properties(height=380)
+            )
+            
+            st.altair_chart(chart, use_container_width=True)
+
+    st.divider()
+
+    # DATA TABLE & EXPORT
+    col_a, col_b = st.columns([3, 1])
+    with col_a:
+        st.subheader("Tracker Data")
+    with col_b:
+        csv_data = filtered_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Export Current View to CSV",
+            data=csv_data,
+            file_name="division_tracker_export.csv",
+            mime="text/csv",
+        )
+
+    st.markdown(STATUS_LEGEND_HTML, unsafe_allow_html=True)
+
+    # Function to apply Division background colors
+    def color_rows(row):
+        div = str(row.get('Div', '')).strip().replace('.0', '')
+        bg_color = TABLE_COLOR_MAP.get(div, '')
+        if bg_color:
+            return [f'background-color: {bg_color}; color: black'] * len(row)
+        return [''] * len(row)
+
+    # Function to apply cell-level status colors for Month Columns (Aug, Sept, Oct)
+    def color_status_cells(val):
+        val_str = str(val).strip().lower()
+        if '100%' in val_str or val_str in ['1', '1.0', 'done']:
+            return 'background-color: #00e5ff; color: black; font-weight: bold;'  # Cyan
+        elif 'late' in val_str:
+            return 'background-color: #ffeb3b; color: black; font-weight: bold;'  # Yellow
+        elif 'not' in val_str or 'missing' in val_str or val_str in ['0', '0.0']:
+            return 'background-color: #ff5252; color: white; font-weight: bold;'   # Red
+        elif 'n/a' in val_str or 'na' in val_str:
+            return 'background-color: #9e9e9e; color: white;'                    # Gray
+        return ''
+
+    styled_df = filtered_df.style.apply(color_rows, axis=1)
+
+    if month_cols:
+        try:
+            styled_df = styled_df.map(color_status_cells, subset=month_cols)
+        except AttributeError:
+            styled_df = styled_df.applymap(color_status_cells, subset=month_cols)
+
+    styled_df = styled_df.format(precision=2, na_rep="")
+    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+
+
+with tab2:
+    # Chart 2: Monthly Submission Status Heatmap
+    st.subheader("Monthly Submission Status")
+    st.markdown(STATUS_LEGEND_HTML, unsafe_allow_html=True)
+
+    if month_cols:
+        melted_df = filtered_df.melt(
+            id_vars=['Section', 'Completer', 'Div'],
+            value_vars=month_cols,
+            var_name='Month',
+            value_name='Status'
+        )
+        
+        melted_df['Status'] = melted_df['Status'].fillna('Not Submitted').astype(str).str.strip()
+        melted_df['Status'] = melted_df['Status'].replace({'': 'Not Submitted', 'nan': 'Not Submitted'})
+        
+        status_chart = (
+            alt.Chart(melted_df)
             .mark_bar()
             .encode(
-                x=alt.X('Completer:N', sort='-y', title='Completer'),
-                y=alt.Y('Total Points Possible:Q', title='Total Points Possible'),
-                color=alt.Color('Div:N', scale=alt.Scale(domain=domain_divisions, range=CHART_COLOR_MAP), title='Division'),
-                tooltip=['Completer', 'Div', 'Total Points Possible']
-            )
-            .properties(height=380)
-        )
-        
-        st.altair_chart(chart, use_container_width=True)
-
-st.divider()
-
-# Chart 2: Monthly Submission Status Heatmap
-st.subheader("Monthly Submission Status")
-st.markdown(STATUS_LEGEND_HTML, unsafe_allow_html=True)
-
-if month_cols:
-    melted_df = filtered_df.melt(
-        id_vars=['Section', 'Completer', 'Div'],
-        value_vars=month_cols,
-        var_name='Month',
-        value_name='Status'
-    )
-    
-    melted_df['Status'] = melted_df['Status'].fillna('Not Submitted').astype(str).str.strip()
-    melted_df['Status'] = melted_df['Status'].replace({'': 'Not Submitted', 'nan': 'Not Submitted'})
-    
-    status_chart = (
-        alt.Chart(melted_df)
-        .mark_bar()
-        .encode(
-            x=alt.X('Month:N', sort=month_cols, title='Month'),
-            y=alt.Y('count():Q', title='Number of Tasks'),
-            color=alt.Color(
-                'Status:N',
-                scale=alt.Scale(
-                    domain=['100%', 'Late', 'Not Submitted', 'N/A'],
-                    range=['#00e5ff', '#ffeb3b', '#ff5252', '#9e9e9e']
+                x=alt.X('Month:N', sort=month_cols, title='Month'),
+                y=alt.Y('count():Q', title='Number of Tasks'),
+                color=alt.Color(
+                    'Status:N',
+                    scale=alt.Scale(
+                        domain=['100%', 'Late', 'Not Submitted', 'N/A'],
+                        range=['#00e5ff', '#ffeb3b', '#ff5252', '#9e9e9e']
+                    ),
+                    title='Submission Status'
                 ),
-                title='Submission Status'
-            ),
-            tooltip=['Month', 'Status', 'count()']
+                tooltip=['Month', 'Status', 'count()']
+            )
+            .properties(height=320)
         )
-        .properties(height=320)
-    )
-    st.altair_chart(status_chart, use_container_width=True)
-else:
-    st.info("No monthly columns found in the current sheet format.")
-
-st.divider()
-
-# ---------------------------------------------------------
-# DATA TABLE & EXPORT
-# ---------------------------------------------------------
-
-col_a, col_b = st.columns([3, 1])
-with col_a:
-    st.subheader("Tracker Data")
-with col_b:
-    csv_data = filtered_df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Export Current View to CSV",
-        data=csv_data,
-        file_name="division_tracker_export.csv",
-        mime="text/csv",
-    )
-
-# Function to apply Division background colors
-def color_rows(row):
-    div = str(row.get('Div', '')).strip().replace('.0', '')
-    bg_color = TABLE_COLOR_MAP.get(div, '')
-    if bg_color:
-        return [f'background-color: {bg_color}; color: black'] * len(row)
-    return [''] * len(row)
-
-# Function to apply cell-level status colors for Month Columns (Aug, Sept, Oct)
-def color_status_cells(val):
-    val_str = str(val).strip().lower()
-    if '100%' in val_str or val_str in ['1', '1.0', 'done']:
-        return 'background-color: #00e5ff; color: black; font-weight: bold;'  # Cyan
-    elif 'late' in val_str:
-        return 'background-color: #ffeb3b; color: black; font-weight: bold;'  # Yellow
-    elif 'not' in val_str or 'missing' in val_str or val_str in ['0', '0.0']:
-        return 'background-color: #ff5252; color: white; font-weight: bold;'   # Red
-    elif 'n/a' in val_str or 'na' in val_str:
-        return 'background-color: #9e9e9e; color: white;'                    # Gray
-    return ''
-
-styled_df = filtered_df.style.apply(color_rows, axis=1)
-
-if month_cols:
-    try:
-        styled_df = styled_df.map(color_status_cells, subset=month_cols)
-    except AttributeError:
-        styled_df = styled_df.applymap(color_status_cells, subset=month_cols)
-
-styled_df = styled_df.format(precision=2, na_rep="")
-st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        st.altair_chart(status_chart, use_container_width=True)
+    else:
+        st.info("No monthly columns found in the current sheet format.")
