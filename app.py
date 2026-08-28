@@ -92,12 +92,12 @@ avg_pts_per_task = round(total_pts / total_tasks, 2) if total_tasks > 0 else 0.0
 # Calculate Overall Health (% of tasks marked 100%)
 completion_rate = 0.0
 if month_cols and total_tasks > 0:
-    all_statuses = filtered_df[month_cols].astype(str).values.flatten()
-    valid_statuses = [s for s in all_statuses if s.strip().lower() not in ['nan', '', 'n/a', 'na']]
+    all_statuses = filtered_df[month_cols].values.flatten()
+    # Adding str(s) guarantees it is text before trying to strip or lowercase it
+    valid_statuses = [str(s) for s in all_statuses if str(s).strip().lower() not in ['nan', '', 'n/a', 'na', 'none']]
     if valid_statuses:
-        on_time = sum(1 for s in valid_statuses if '100%' in s or s in ['1', '1.0', 'done'])
+        on_time = sum(1 for s in valid_statuses if '100%' in str(s) or str(s).strip().lower() in ['1', '1.0', 'done'])
         completion_rate = round((on_time / len(valid_statuses)) * 100, 1)
-
 st.subheader("Current View Metrics")
 col1, col2, col3, col4, col5 = st.columns(5)
 
