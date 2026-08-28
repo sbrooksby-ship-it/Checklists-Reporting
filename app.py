@@ -12,13 +12,10 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 @st.cache_data(ttl=600)
 def load_data():
-    # header=2 sets row 3 as column headers
     df = conn.read(header=2)
     df = df.dropna(subset=['Completer'], how='all')
-    
     if 'Div' in df.columns:
         df['Div'] = df['Div'].ffill()
-        
     return df
 
 try:
@@ -32,15 +29,21 @@ st.sidebar.header("Navigation")
 # Clean 'Div' column to avoid float issues (.0)
 df['Div'] = df['Div'].fillna("").astype(str).str.strip().str.replace('.0', '', regex=False)
 
-# 1. QUICK DIVISION FILTER
+# 1. QUICK DIVISION & SEARCH FILTERS
 div_options = ["All"] + sorted([d for d in df['Div'].unique() if d and d.lower() != 'nan'])
 selected_div = st.sidebar.radio("Quick Filter: Division", options=div_options)
+
+search_query = st.sidebar.text_input("🔍 Keyword Search (Section, Completer, etc.)", "")
 
 filtered_df = df.copy()
 if selected_div != "All":
     filtered_df = filtered_df[filtered_df['Div'] == selected_div]
 
-# Identify month columns dynamically
+# Apply Keyword Search across all string columns
+if search_query:
+    mask = filtered_df.astype(str).apply(lambda x: x.str.contains(search_query, case=False, na=False)).any(axis=1)
+    filtered_df = filtered_df[mask]
+
 possible_months = ['Aug', 'Sept', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul']
 month_cols = [c for c in filtered_df.columns if c in possible_months or any(m in c for m in possible_months)]
 
@@ -72,13 +75,12 @@ with st.sidebar.expander("More Filters (Optional)"):
         if selected_due:
             filtered_df = filtered_df[filtered_df['Due Date'].isin(selected_due)]
 
-# Force numeric columns to floats
 for col in ['# of TM', '# of Points', 'Total Points Possible']:
     if col in filtered_df.columns:
         filtered_df[col] = pd.to_numeric(filtered_df[col], errors='coerce').fillna(0)
 
 # ---------------------------------------------------------
-# METRIC CALCULATIONS
+# METRIC CALCULATIONS & HEALTH SCORE
 # ---------------------------------------------------------
 total_tasks = len(filtered_df)
 total_tm = int(filtered_df['# of TM'].sum()) if '# of TM' in filtered_df.columns else 0
@@ -87,40 +89,40 @@ total_pts = filtered_df['Total Points Possible'].sum() if 'Total Points Possible
 avg_pts_per_tm = round(total_pts / total_tm, 2) if total_tm > 0 else 0.0
 avg_pts_per_task = round(total_pts / total_tasks, 2) if total_tasks > 0 else 0.0
 
+# Calculate Overall Health (% of tasks marked 100%)
+completion_rate = 0.0
+if month_cols and total_tasks > 0:
+    all_statuses = filtered_df[month_cols].astype(str).values.flatten()
+    valid_statuses = [s for s in all_statuses if s.strip().lower() not in ['nan', '', 'n/a', 'na']]
+    if valid_statuses:
+        on_time = sum(1 for s in valid_statuses if '100%' in s or s in ['1', '1.0', 'done'])
+        completion_rate = round((on_time / len(valid_statuses)) * 100, 1)
+
 st.subheader("Current View Metrics")
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
     st.metric(label="Total Active Tasks", value=total_tasks)
 with col2:
     st.metric(label="Total Team Members", value=total_tm)
 with col3:
-    st.metric(label="Avg Points / Person", value=avg_pts_per_tm, help="Total Points Possible ÷ Total Team Members")
+    st.metric(label="Avg Points / Person", value=avg_pts_per_tm)
 with col4:
-    st.metric(label="Avg Weight / Task", value=avg_pts_per_task, help="Average point density per task section")
+    st.metric(label="Avg Weight / Task", value=avg_pts_per_task)
+with col5:
+    st.metric(label="Overall On-Time %", value=f"{completion_rate}%", help="Percentage of valid monthly submissions marked 100%")
 
 st.divider()
 
 # ---------------------------------------------------------
 # COLOR MAP DEFINITIONS
 # ---------------------------------------------------------
-
-# Division Colors (Row Backgrounds)
 TABLE_COLOR_MAP = {
-    '1': '#fff8e1',  # Light Yellow
-    '2': '#f3e5f5',  # Light Purple
-    '3': '#e8f5e9',  # Light Green
-    '4': '#fff3e0',  # Light Peach/Orange
-    '5': '#fce4ec',  # Light Pink
-    '6': '#e0f7fa',  # Light Cyan/Teal
-    '7': '#e3f2fd',  # Light Blue
+    '1': '#fff8e1', '2': '#f3e5f5', '3': '#e8f5e9', 
+    '4': '#fff3e0', '5': '#fce4ec', '6': '#e0f7fa', '7': '#e3f2fd'
 }
+CHART_COLOR_MAP = ['#fbc02d', '#ab47bc', '#66bb6a', '#ffa726', '#ec407a', '#26c6da', '#42a5f5']
 
-CHART_COLOR_MAP = [
-    '#fbc02d', '#ab47bc', '#66bb6a', '#ffa726', '#ec407a', '#26c6da', '#42a5f5'
-]
-
-# Status Badge Legend HTML helper
 STATUS_LEGEND_HTML = """
 <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 18px; flex-wrap: wrap;">
     <span style="font-weight: bold; font-size: 14px;">Status Legend:</span>
@@ -137,71 +139,46 @@ STATUS_LEGEND_HTML = """
 tab1, tab2 = st.tabs(["📊 Main Dashboard", "🗓️ Monthly Status Heatmap"])
 
 with tab1:
-    # Chart 1: Performance Overview
     st.subheader("Performance Overview")
     if 'Completer' in filtered_df.columns and 'Total Points Possible' in filtered_df.columns:
-        chart_data = (
-            filtered_df[filtered_df['Completer'] != ""]
-            .groupby(['Completer', 'Div'])['Total Points Possible']
-            .sum()
-            .reset_index()
-        )
-        
+        chart_data = filtered_df[filtered_df['Completer'] != ""].groupby(['Completer', 'Div'])['Total Points Possible'].sum().reset_index()
         if not chart_data.empty:
             domain_divisions = ['1', '2', '3', '4', '5', '6', '7']
-            
-            chart = (
-                alt.Chart(chart_data)
-                .mark_bar()
-                .encode(
-                    x=alt.X('Completer:N', sort='-y', title='Completer'),
-                    y=alt.Y('Total Points Possible:Q', title='Total Points Possible'),
-                    color=alt.Color('Div:N', scale=alt.Scale(domain=domain_divisions, range=CHART_COLOR_MAP), title='Division'),
-                    tooltip=['Completer', 'Div', 'Total Points Possible']
-                )
-                .properties(height=380)
-            )
-            
+            chart = alt.Chart(chart_data).mark_bar().encode(
+                x=alt.X('Completer:N', sort='-y', title='Completer'),
+                y=alt.Y('Total Points Possible:Q', title='Total Points Possible'),
+                color=alt.Color('Div:N', scale=alt.Scale(domain=domain_divisions, range=CHART_COLOR_MAP), title='Division'),
+                tooltip=['Completer', 'Div', 'Total Points Possible']
+            ).properties(height=380)
             st.altair_chart(chart, use_container_width=True)
 
     st.divider()
 
-    # DATA TABLE & EXPORT
     col_a, col_b = st.columns([3, 1])
     with col_a:
         st.subheader("Tracker Data")
     with col_b:
         csv_data = filtered_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Export Current View to CSV",
-            data=csv_data,
-            file_name="division_tracker_export.csv",
-            mime="text/csv",
-        )
+        st.download_button("📥 Export Current View to CSV", data=csv_data, file_name="division_tracker_export.csv", mime="text/csv")
 
-    # Function to apply Division background colors
     def color_rows(row):
         div = str(row.get('Div', '')).strip().replace('.0', '')
         bg_color = TABLE_COLOR_MAP.get(div, '')
-        if bg_color:
-            return [f'background-color: {bg_color}; color: black'] * len(row)
-        return [''] * len(row)
+        return [f'background-color: {bg_color}; color: black'] * len(row) if bg_color else [''] * len(row)
 
-    # Function to apply cell-level status colors for Month Columns (Aug, Sept, Oct)
     def color_status_cells(val):
         val_str = str(val).strip().lower()
         if '100%' in val_str or val_str in ['1', '1.0', 'done']:
-            return 'background-color: #00e5ff; color: black; font-weight: bold;'  # Cyan
+            return 'background-color: #00e5ff; color: black; font-weight: bold;'
         elif 'late' in val_str:
-            return 'background-color: #ffeb3b; color: black; font-weight: bold;'  # Yellow
+            return 'background-color: #ffeb3b; color: black; font-weight: bold;'
         elif 'not' in val_str or 'missing' in val_str or val_str in ['0', '0.0']:
-            return 'background-color: #ff5252; color: white; font-weight: bold;'   # Red
+            return 'background-color: #ff5252; color: white; font-weight: bold;'
         elif 'n/a' in val_str or 'na' in val_str:
-            return 'background-color: #9e9e9e; color: white;'                    # Gray
+            return 'background-color: #9e9e9e; color: white;'
         return ''
 
     styled_df = filtered_df.style.apply(color_rows, axis=1)
-
     if month_cols:
         try:
             styled_df = styled_df.map(color_status_cells, subset=month_cols)
@@ -213,8 +190,7 @@ with tab1:
 
 
 with tab2:
-    # Chart 2: Monthly Submission Status Heatmap
-    st.subheader("Monthly Submission Status")
+    st.subheader("Completer Status Heatmap")
     st.markdown(STATUS_LEGEND_HTML, unsafe_allow_html=True)
 
     if month_cols:
@@ -228,24 +204,22 @@ with tab2:
         melted_df['Status'] = melted_df['Status'].fillna('Not Submitted').astype(str).str.strip()
         melted_df['Status'] = melted_df['Status'].replace({'': 'Not Submitted', 'nan': 'Not Submitted'})
         
-        status_chart = (
-            alt.Chart(melted_df)
-            .mark_bar()
-            .encode(
-                x=alt.X('Month:N', sort=month_cols, title='Month'),
-                y=alt.Y('count():Q', title='Number of Tasks'),
-                color=alt.Color(
-                    'Status:N',
-                    scale=alt.Scale(
-                        domain=['100%', 'Late', 'Not Submitted', 'N/A'],
-                        range=['#00e5ff', '#ffeb3b', '#ff5252', '#9e9e9e']
-                    ),
-                    title='Submission Status'
+        # TRUE MATRIX HEATMAP
+        heatmap = alt.Chart(melted_df).mark_rect(stroke='white', strokeWidth=1).encode(
+            x=alt.X('Month:N', sort=month_cols, title='Month', axis=alt.Axis(labelAngle=0)),
+            y=alt.Y('Completer:N', title='Completer'),
+            color=alt.Color(
+                'Status:N',
+                scale=alt.Scale(
+                    domain=['100%', 'Late', 'Not Submitted', 'N/A'],
+                    range=['#00e5ff', '#ffeb3b', '#ff5252', '#9e9e9e']
                 ),
-                tooltip=['Month', 'Status', 'count()']
-            )
-            .properties(height=320)
-        )
-        st.altair_chart(status_chart, use_container_width=True)
+                title='Submission Status',
+                legend=None # Legend is handled by HTML above
+            ),
+            tooltip=['Completer', 'Section', 'Month', 'Status']
+        ).properties(height=max(300, len(filtered_df['Completer'].unique()) * 25))
+        
+        st.altair_chart(heatmap, use_container_width=True)
     else:
         st.info("No monthly columns found in the current sheet format.")
