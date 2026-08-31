@@ -24,6 +24,43 @@ except Exception as e:
     st.error(f"Error loading data. Check your secrets.toml URL. Details: {e}")
     st.stop()
 
+# ---------------------------------------------------------
+# AUTHENTICATION & ROLE-BASED FILTERING
+# ---------------------------------------------------------
+# 1. Enforce Login
+if not st.experimental_user.is_logged_in:
+    st.warning("Please log in to view the Division Tracker.")
+    if st.button("Log in with Google"):
+        st.login("google")
+    st.stop() # Stops the rest of the app from running until logged in
+
+# 2. Get User Email & Show Logout
+user_email = st.experimental_user.email
+st.sidebar.markdown(f"**👤 Logged in as:**\n{user_email}")
+if st.sidebar.button("Log out"):
+    st.logout()
+st.sidebar.divider()
+
+# 3. Apply Permissions Filter
+# ADD YOUR UNLIMITED ACCESS EMAILS HERE:
+admin_emails = [
+    "sbrooksby@bonadmin.com", 
+    "bwilson@bonadmin.com", 
+    "adickson@bonadmin.com"
+] 
+
+if user_email.lower() not in [email.lower() for email in admin_emails]:
+    if 'Completer_Email' in df.columns:
+        # Filter the master dataframe down to just this user's rows
+        df = df[df['Completer_Email'].astype(str).str.strip().str.lower() == user_email.lower()]
+    else:
+        st.error("Setup Error: 'Completer_Email' column missing in Google Sheets.")
+        st.stop()
+
+
+# ---------------------------------------------------------
+# NAVIGATION & FILTERS
+# ---------------------------------------------------------
 st.sidebar.header("Navigation")
 
 # Clean 'Div' column to avoid float issues (.0)
@@ -98,6 +135,7 @@ if month_cols and total_tasks > 0:
     if valid_statuses:
         on_time = sum(1 for s in valid_statuses if '100%' in str(s) or str(s).strip().lower() in ['1', '1.0', 'done'])
         completion_rate = round((on_time / len(valid_statuses)) * 100, 1)
+
 st.subheader("Current View Metrics")
 col1, col2, col3, col4, col5 = st.columns(5)
 
@@ -215,7 +253,7 @@ with tab2:
                     range=['#00e5ff', '#ffeb3b', '#ff5252', '#9e9e9e']
                 ),
                 title='Submission Status',
-                legend=None # Legend is handled by HTML above
+                legend=None 
             ),
             tooltip=['Completer', 'Section', 'Month', 'Status']
         ).properties(height=max(300, len(filtered_df['Completer'].unique()) * 25))
