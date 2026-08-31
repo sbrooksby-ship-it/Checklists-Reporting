@@ -57,6 +57,9 @@ if user_email.lower() not in [email.lower() for email in admin_emails]:
         st.error("Setup Error: 'Completer_Email' column missing in Google Sheets.")
         st.stop()
 
+# ---> ADD THESE TWO LINES <---
+if 'Completer_Email' in df.columns:
+    df = df.drop(columns=['Completer_Email'])
 
 # ---------------------------------------------------------
 # NAVIGATION & FILTERS
