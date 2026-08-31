@@ -28,15 +28,14 @@ except Exception as e:
 # AUTHENTICATION & ROLE-BASED FILTERING
 # ---------------------------------------------------------
 # 1. Enforce Login
-if not st.experimental_user.is_logged_in:
+if not st.user.is_logged_in:
     st.warning("Please log in to view the Division Tracker.")
     if st.button("Log in with Google"):
-        st.login("google")
-    st.stop() # Stops the rest of the app from running until logged in
+        st.login()
+    st.stop()
 
 # 2. Get User Email & Show Logout
-user_email = st.experimental_user.email
-user_email = st.experimental_user.email
+user_email = st.user.email
 st.sidebar.markdown(f"**👤 Logged in as:**\n{user_email}")
 if st.sidebar.button("Log out"):
     st.logout()
