@@ -36,6 +36,7 @@ if not st.experimental_user.is_logged_in:
 
 # 2. Get User Email & Show Logout
 user_email = st.experimental_user.email
+user_email = st.experimental_user.email
 st.sidebar.markdown(f"**👤 Logged in as:**\n{user_email}")
 if st.sidebar.button("Log out"):
     st.logout()
