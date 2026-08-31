@@ -192,6 +192,38 @@ with tab1:
                 tooltip=['Completer', 'Div', 'Total Points Possible']
             ).properties(height=380)
             st.altair_chart(chart, use_container_width=True)
+            
+    # ---------------------------------------------------------
+    # CHART 2: Trend Line (New)
+    # ---------------------------------------------------------
+    if month_cols:
+        st.subheader("Points Trend")
+        
+        # Melt the dataframe to get a row for every month per completer
+        trend_df = filtered_df[['Completer'] + month_cols].melt(
+            id_vars=['Completer'],
+            value_vars=month_cols,
+            var_name='Month',
+            value_name='Points'
+        )
+        
+        # Force the column to be numeric. Text like "None" or "Late" becomes NaN, which we fill with 0
+        trend_df['Points'] = pd.to_numeric(trend_df['Points'], errors='coerce').fillna(0)
+        
+        # Group by month to get total points for the current view
+        trend_data = trend_df.groupby('Month')['Points'].sum().reset_index()
+        
+        # Enforce chronological school-year order on the X-axis
+        month_order = ['Aug', 'Sept', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul']
+        
+        # Draw the line chart with points
+        trend_line = alt.Chart(trend_data).mark_line(point=True, strokeWidth=3, color='#42a5f5').encode(
+            x=alt.X('Month:N', sort=month_order, title='Month', axis=alt.Axis(labelAngle=0)),
+            y=alt.Y('Points:Q', title='Total Points Earned'),
+            tooltip=[alt.Tooltip('Month:N'), alt.Tooltip('Points:Q', title='Points')]
+        ).properties(height=300)
+        
+        st.altair_chart(trend_line, use_container_width=True)
 
     st.divider()
 
