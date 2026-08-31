@@ -30,7 +30,7 @@ except Exception as e:
 # 1. Enforce Login
 if not st.user.is_logged_in:
     st.warning("Please log in to view the Division Tracker.")
-if st.button("Log in with Google"):
+    if st.button("Log in with Google"):
         st.login("google")
     st.stop()
 
